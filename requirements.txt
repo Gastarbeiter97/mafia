@@ -1,0 +1,5 @@
+streamlit
+groq
+google-genai
+openai
+python-dotenv
