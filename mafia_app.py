@@ -13,20 +13,29 @@ from openai import OpenAI
 #  API SETUP
 # ============================================================
 load_dotenv(Path(__file__).parent / ".env")
-gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+def acar(ad):
+    try:
+        if ad in st.secrets:
+            return st.secrets[ad]
+    except Exception:
+        pass
+    return os.getenv(ad)
+
+gemini_client = genai.Client(api_key=acar("GEMINI_API_KEY"))
+groq_client = Groq(api_key=acar("GROQ_API_KEY"))
 
 cerebras_client = None
-if os.getenv("CEREBRAS_API_KEY"):
+if acar("CEREBRAS_API_KEY"):
     cerebras_client = OpenAI(
-        api_key=os.getenv("CEREBRAS_API_KEY"),
+        api_key=acar("CEREBRAS_API_KEY"),
         base_url="https://api.cerebras.ai/v1"
     )
 
 nvidia_client = None
-if os.getenv("NVIDIA_API_KEY"):
+if acar("NVIDIA_API_KEY"):
     nvidia_client = OpenAI(
-        api_key=os.getenv("NVIDIA_API_KEY"),
+        api_key=acar("NVIDIA_API_KEY"),
         base_url="https://integrate.api.nvidia.com/v1"
     )
 
