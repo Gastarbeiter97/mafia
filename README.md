@@ -1,5 +1,7 @@
 # 🕵️ Mafia AI
 
+**🎮 [Play it live](https://mafiaai.streamlit.app)**
+
 A multi-agent social deduction game where 5 AI players each have secret roles, lie, accuse each other, and vote — powered by LLM APIs.
 
 ## Features
