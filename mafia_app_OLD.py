@@ -14,8 +14,6 @@ from openai import OpenAI
 # ============================================================
 load_dotenv(Path(__file__).parent / ".env")
 
-TIMEOUT_S = 20   # hər sorğu üçün maksimum gözləmə (saniyə). Asılıb qalmağın qarşısını alır.
-
 def acar(ad):
     try:
         if ad in st.secrets:
@@ -24,37 +22,22 @@ def acar(ad):
         pass
     return os.getenv(ad)
 
+gemini_client = genai.Client(api_key=acar("GEMINI_API_KEY"))
+groq_client = Groq(api_key=acar("GROQ_API_KEY"))
 
-# Klientlər BİR DƏFƏ yaradılır və keşlənir (hər rerun-da təzədən qurulmur).
-# timeout + max_retries=0 => yavaş/ölü provider tez uğursuz olur, failover dərhal növbətiyə keçir.
-@st.cache_resource
-def klientleri_qur():
-    gemini = genai.Client(
-        api_key=acar("GEMINI_API_KEY"),
-        http_options={"timeout": TIMEOUT_S * 1000},  # google-genai ms ilə işləyir
+cerebras_client = None
+if acar("CEREBRAS_API_KEY"):
+    cerebras_client = OpenAI(
+        api_key=acar("CEREBRAS_API_KEY"),
+        base_url="https://api.cerebras.ai/v1"
     )
-    groq = Groq(api_key=acar("GROQ_API_KEY"), timeout=float(TIMEOUT_S), max_retries=0)
 
-    cerebras = None
-    if acar("CEREBRAS_API_KEY"):
-        cerebras = OpenAI(
-            api_key=acar("CEREBRAS_API_KEY"),
-            base_url="https://api.cerebras.ai/v1",
-            timeout=float(TIMEOUT_S), max_retries=0,
-        )
-
-    nvidia = None
-    if acar("NVIDIA_API_KEY"):
-        nvidia = OpenAI(
-            api_key=acar("NVIDIA_API_KEY"),
-            base_url="https://integrate.api.nvidia.com/v1",
-            timeout=float(TIMEOUT_S), max_retries=0,
-        )
-
-    return gemini, groq, cerebras, nvidia
-
-
-gemini_client, groq_client, cerebras_client, nvidia_client = klientleri_qur()
+nvidia_client = None
+if acar("NVIDIA_API_KEY"):
+    nvidia_client = OpenAI(
+        api_key=acar("NVIDIA_API_KEY"),
+        base_url="https://integrate.api.nvidia.com/v1"
+    )
 
 
 def groq_sorgu(prompt):
@@ -110,14 +93,13 @@ def gemini_sorgu(prompt):
         return None
 
 
-# SÜRƏT SIRASI: sürətli modellər əvvəldə. NVIDIA 70B YAVAŞDIR -> yalnız son çarə.
-saglayicilar = [groq_sorgu, gemini_sorgu, cerebras_sorgu, nvidia_sorgu]
+saglayicilar = [groq_sorgu, nvidia_sorgu, gemini_sorgu, cerebras_sorgu]
 _esas = {"index": 0}
 
 
 def llm_sorgu(prompt):
     say = len(saglayicilar)
-    for cehd in range(2):
+    for _ in range(2):
         for i in range(say):
             index = (_esas["index"] + i) % say
             cavab = saglayicilar[index](prompt)
@@ -126,8 +108,7 @@ def llm_sorgu(prompt):
                     print(f"🔄 Keçid: {saglayicilar[_esas['index']].__name__} → {saglayicilar[index].__name__}")
                     _esas["index"] = index
                 return cavab
-        if cehd == 0:
-            time.sleep(2)   # yalnız birinci tam uğursuz keçiddən sonra qısa gözləmə
+        time.sleep(5)
     return None
 
 
