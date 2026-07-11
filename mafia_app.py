@@ -47,7 +47,8 @@ def groq_sorgu(prompt):
             messages=[{"role": "user", "content": prompt}]
         )
         return r.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        print(f"❌ Groq: {e}")
         return None
 
 
@@ -56,16 +57,18 @@ def cerebras_sorgu(prompt):
         return None
     try:
         r = cerebras_client.chat.completions.create(
-            model="llama-3.3-70b",
+            model="gemma-4-31b",
             messages=[{"role": "user", "content": prompt}]
         )
         return r.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        print(f"❌ Cerebras: {e}")
         return None
 
 
 def nvidia_sorgu(prompt):
     if nvidia_client is None:
+        print("❌ NVIDIA: client yoxdur (açar yüklənməyib)")
         return None
     try:
         r = nvidia_client.chat.completions.create(
@@ -73,7 +76,8 @@ def nvidia_sorgu(prompt):
             messages=[{"role": "user", "content": prompt}]
         )
         return r.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        print(f"❌ NVIDIA: {e}")
         return None
 
 
@@ -84,11 +88,12 @@ def gemini_sorgu(prompt):
             contents=prompt
         )
         return r.text.strip()
-    except Exception:
+    except Exception as e:
+        print(f"❌ Gemini: {e}")
         return None
 
 
-saglayicilar = [groq_sorgu, cerebras_sorgu, nvidia_sorgu, gemini_sorgu]
+saglayicilar = [groq_sorgu, nvidia_sorgu, gemini_sorgu, cerebras_sorgu]
 _esas = {"index": 0}
 
 
@@ -99,7 +104,9 @@ def llm_sorgu(prompt):
             index = (_esas["index"] + i) % say
             cavab = saglayicilar[index](prompt)
             if cavab is not None:
-                _esas["index"] = index
+                if index != _esas["index"]:
+                    print(f"🔄 Keçid: {saglayicilar[_esas['index']].__name__} → {saglayicilar[index].__name__}")
+                    _esas["index"] = index
                 return cavab
         time.sleep(5)
     return None
@@ -113,6 +120,8 @@ def ad_generasiya_et():
     metn = llm_sorgu(prompt)
     if metn:
         metn = metn.replace("```json", "").replace("```", "").strip()
+        if "[" in metn and "]" in metn:
+            metn = metn[metn.index("["):metn.rindex("]") + 1]
         try:
             return json.loads(metn)
         except Exception:

@@ -23,24 +23,31 @@ if os.getenv("NVIDIA_API_KEY"):
     )
 
 def cerebras_sorgu(prompt):
+    if cerebras_client is None:
+        return None
     try:
-        response = cerebras_client.chat.completions.create(
-            model="llama-3.3-70b",
+        r = cerebras_client.chat.completions.create(
+            model="gemma-4-31b",
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content.strip()
-    except Exception:
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ Cerebras: {e}")
         return None
 
 
 def nvidia_sorgu(prompt):
+    if nvidia_client is None:
+        print("❌ NVIDIA: client yoxdur (açar yüklənməyib)")
+        return None
     try:
-        response = nvidia_client.chat.completions.create(
+        r = nvidia_client.chat.completions.create(
             model="meta/llama-3.3-70b-instruct",
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content.strip()
-    except Exception:
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ NVIDIA: {e}")
         return None
 
 def ai_hekim_xilas(oyuncu, saglar):
@@ -80,48 +87,27 @@ YALNIZ bir ad yaz, başqa heç nə."""
 
 def groq_sorgu(prompt):
     try:
-        response = groq_client.chat.completions.create(
+        r = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content.strip()
-    except Exception:
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ Groq: {e}")
         return None
-
-
-def cerebras_sorgu(prompt):
-    try:
-        response = cerebras_client.chat.completions.create(
-            model="llama-3.3-70b",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return None
-
-
-def nvidia_sorgu(prompt):
-    try:
-        response = nvidia_client.chat.completions.create(
-            model="meta/llama-3.3-70b-instruct",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return None
-
 
 def gemini_sorgu(prompt):
     try:
-        response = gemini_client.models.generate_content(
+        r = gemini_client.models.generate_content(
             model="gemini-2.5-flash-lite",
             contents=prompt
         )
-        return response.text.strip()
-    except Exception:
+        return r.text.strip()
+    except Exception as e:
+        print(f"❌ Gemini: {e}")
         return None
 
-saglayicilar = [groq_sorgu, cerebras_sorgu, nvidia_sorgu, gemini_sorgu]
+saglayicilar = [groq_sorgu, nvidia_sorgu, gemini_sorgu, cerebras_sorgu]
 esas_index = 0
 
 
@@ -133,7 +119,9 @@ def llm_sorgu(prompt):
             index = (esas_index + i) % say
             cavab = saglayicilar[index](prompt)
             if cavab is not None:
-                esas_index = index
+                if index != esas_index:   # yalnız dəyişəndə göstər
+                    print(f"🔄 Keçid: {saglayicilar[esas_index].__name__} → {saglayicilar[index].__name__}")
+                    esas_index = index
                 return cavab
         print("⚠️ Bütün provayderlər məşğuldur, 5 saniyə gözləyirəm...")
         time.sleep(5)
@@ -144,7 +132,13 @@ def ad_generasiya_et():
     metn = llm_sorgu(prompt)
     if metn:
         metn = metn.replace("```json", "").replace("```", "").strip()
-        return json.loads(metn)
+        # yalnız [ ... ] hissəsini götür (artıq mətni at)
+        if "[" in metn and "]" in metn:
+            metn = metn[metn.index("["):metn.rindex("]") + 1]
+        try:
+            return json.loads(metn)
+        except Exception:
+            pass
     return ["Orxan", "Rəşad", "Eyvaz", "Ağa", "Nigar"]
 
 ai_adlar = ad_generasiya_et()
