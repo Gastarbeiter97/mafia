@@ -4,6 +4,7 @@ import json
 import os
 import streamlit as st
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from google import genai
 from groq import Groq
 from dotenv import load_dotenv
@@ -14,7 +15,8 @@ from openai import OpenAI
 # ============================================================
 load_dotenv(Path(__file__).parent / ".env")
 
-TIMEOUT_S = 20   # hər sorğu üçün maksimum gözləmə (saniyə). Asılıb qalmağın qarşısını alır.
+TIMEOUT_S = 10        # SDK-in oz timeout-u (backstop)
+HARD_TIMEOUT_S = 12   # QETI divar-saati limiti: SDK asilib qalsa bele, burada kesilir
 
 def acar(ad):
     try:
@@ -25,13 +27,11 @@ def acar(ad):
     return os.getenv(ad)
 
 
-# Klientlər BİR DƏFƏ yaradılır və keşlənir (hər rerun-da təzədən qurulmur).
-# timeout + max_retries=0 => yavaş/ölü provider tez uğursuz olur, failover dərhal növbətiyə keçir.
 @st.cache_resource
 def klientleri_qur():
     gemini = genai.Client(
         api_key=acar("GEMINI_API_KEY"),
-        http_options={"timeout": TIMEOUT_S * 1000},  # google-genai ms ilə işləyir
+        http_options={"timeout": TIMEOUT_S * 1000},
     )
     groq = Groq(api_key=acar("GROQ_API_KEY"), timeout=float(TIMEOUT_S), max_retries=0)
 
@@ -57,6 +57,15 @@ def klientleri_qur():
 gemini_client, groq_client, cerebras_client, nvidia_client = klientleri_qur()
 
 
+@st.cache_resource
+def ishci_qur():
+    # Bir defe yaradilir; hər sorğunu ayrı thread-də timeout ilə icra edir.
+    return ThreadPoolExecutor(max_workers=8)
+
+
+_ishci = ishci_qur()
+
+
 def groq_sorgu(prompt):
     try:
         r = groq_client.chat.completions.create(
@@ -65,7 +74,7 @@ def groq_sorgu(prompt):
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
-        print(f"❌ Groq: {e}")
+        print(f"❌ Groq: {e}", flush=True)
         return None
 
 
@@ -79,13 +88,13 @@ def cerebras_sorgu(prompt):
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
-        print(f"❌ Cerebras: {e}")
+        print(f"❌ Cerebras: {e}", flush=True)
         return None
 
 
 def nvidia_sorgu(prompt):
     if nvidia_client is None:
-        print("❌ NVIDIA: client yoxdur (açar yüklənməyib)")
+        print("❌ NVIDIA: client yoxdur (açar yüklənməyib)", flush=True)
         return None
     try:
         r = nvidia_client.chat.completions.create(
@@ -94,7 +103,7 @@ def nvidia_sorgu(prompt):
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
-        print(f"❌ NVIDIA: {e}")
+        print(f"❌ NVIDIA: {e}", flush=True)
         return None
 
 
@@ -106,28 +115,41 @@ def gemini_sorgu(prompt):
         )
         return r.text.strip()
     except Exception as e:
-        print(f"❌ Gemini: {e}")
+        print(f"❌ Gemini: {e}", flush=True)
         return None
 
 
-# SÜRƏT SIRASI: sürətli modellər əvvəldə. NVIDIA 70B YAVAŞDIR -> yalnız son çarə.
+# SÜRƏT SIRASI: sürətli modellər əvvəldə. NVIDIA 70B ən sonda (son çarə).
 saglayicilar = [groq_sorgu, gemini_sorgu, cerebras_sorgu, nvidia_sorgu]
 _esas = {"index": 0}
 
 
+def _qeti_cagir(func, prompt):
+    """Provideri ayrı thread-də çağırır; HARD_TIMEOUT_S-dən çox çəkərsə None qaytarır.
+    Bu, hər hansı SDK-nın asılıb qalmasının qarşısını GARANTİYALI şəkildə alır."""
+    fut = _ishci.submit(func, prompt)
+    try:
+        return fut.result(timeout=HARD_TIMEOUT_S)
+    except FuturesTimeout:
+        print(f"⏱️ {func.__name__}: {HARD_TIMEOUT_S}s aşıldı, keçirəm", flush=True)
+        return None
+    except Exception as e:
+        print(f"❌ {func.__name__} (thread): {e}", flush=True)
+        return None
+
+
 def llm_sorgu(prompt):
     say = len(saglayicilar)
-    for cehd in range(2):
-        for i in range(say):
-            index = (_esas["index"] + i) % say
-            cavab = saglayicilar[index](prompt)
-            if cavab is not None:
-                if index != _esas["index"]:
-                    print(f"🔄 Keçid: {saglayicilar[_esas['index']].__name__} → {saglayicilar[index].__name__}")
-                    _esas["index"] = index
-                return cavab
-        if cehd == 0:
-            time.sleep(2)   # yalnız birinci tam uğursuz keçiddən sonra qısa gözləmə
+    # TƏK keçid: hər provider ən çox 1 dəfə, qəti timeout ilə. Maks ≈ say × HARD_TIMEOUT_S.
+    for i in range(say):
+        index = (_esas["index"] + i) % say
+        cavab = _qeti_cagir(saglayicilar[index], prompt)
+        if cavab is not None:
+            if index != _esas["index"]:
+                print(f"🔄 Keçid: {saglayicilar[_esas['index']].__name__} → {saglayicilar[index].__name__}", flush=True)
+                _esas["index"] = index
+            return cavab
+    print("⚠️ Bütün providerlər uğursuz oldu, təsadüfi fallback.", flush=True)
     return None
 
 
